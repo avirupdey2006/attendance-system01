@@ -73,7 +73,7 @@ const CameraView = ({
   };
 
   return (
-    <div className={cn('relative overflow-hidden rounded-xl bg-secondary', className)}>
+    <div className={cn('relative overflow-hidden rounded-xl bg-secondary min-h-[320px]', className)}>
       {!isStreaming ? (
         <button
           onClick={onStartCamera}
@@ -97,7 +97,7 @@ const CameraView = ({
             autoPlay
             playsInline
             muted
-            className="w-full h-full object-cover"
+            className="absolute inset-0 w-full h-full object-cover"
           />
           
           {/* Face detection frame overlay */}
