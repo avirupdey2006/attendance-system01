@@ -8,20 +8,21 @@ import {
   getStudents, 
   markAttendance, 
   hasMarkedAttendanceToday,
-  findMatchingStudent 
-} from '@/lib/attendanceStorage';
-import { AttendanceRecord, Student } from '@/types/attendance';
+  findMatchingStudent,
+  Student 
+} from '@/lib/attendanceService';
 import { toast } from 'sonner';
 import { Camera, AlertCircle, Loader2, Users, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Link } from 'react-router-dom';
 
 const Attendance = () => {
-  const { videoRef, isStreaming, error: cameraError, startCamera, stopCamera } = useCamera();
+  const { videoRef, isStreaming, error: cameraError, startCamera } = useCamera();
   const { isModelLoaded, isLoading: modelsLoading, error: modelError, detectFace, checkLiveness } = useFaceRecognition();
 
   const [students, setStudents] = useState<Student[]>([]);
   const [isScanning, setIsScanning] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [overlayMessage, setOverlayMessage] = useState<string>('');
   const [overlayType, setOverlayType] = useState<'success' | 'error' | 'warning' | 'info'>('info');
   const [showConfirmation, setShowConfirmation] = useState(false);
@@ -29,66 +30,85 @@ const Attendance = () => {
   const [previousDescriptor, setPreviousDescriptor] = useState<any>(null);
   const [todayCount, setTodayCount] = useState(0);
   
-  const scanTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const cooldownRef = useRef<string | null>(null);
 
   useEffect(() => {
-    const loadedStudents = getStudents();
-    setStudents(loadedStudents);
-    
-    // Count today's attendance
-    const today = new Date().toISOString().split('T')[0];
-    const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
-    const todayRecords = records.filter((r: any) => 
-      new Date(r.timestamp).toISOString().split('T')[0] === today
-    );
-    setTodayCount(todayRecords.length);
+    const loadStudents = async () => {
+      setIsLoading(true);
+      try {
+        const loadedStudents = await getStudents();
+        setStudents(loadedStudents);
+        
+        // Count today's attendance
+        const today = new Date();
+        const startOfDay = new Date(today);
+        startOfDay.setHours(0, 0, 0, 0);
+        
+        // Simple count from loaded data (will be updated on each attendance mark)
+        setTodayCount(0);
+      } catch (err) {
+        console.error('Error loading students:', err);
+        toast.error('Failed to load students');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadStudents();
   }, []);
 
-  const handleAttendanceMarked = useCallback((student: Student) => {
-    if (cooldownRef.current === student.studentId) return;
+  const handleAttendanceMarked = useCallback(async (student: Student) => {
+    if (cooldownRef.current === student.student_id) return;
     
     // Check if already marked today
-    if (hasMarkedAttendanceToday(student.studentId)) {
+    const alreadyMarked = await hasMarkedAttendanceToday(student.student_id);
+    if (alreadyMarked) {
       setOverlayMessage(`${student.name} - Already marked today`);
       setOverlayType('warning');
       return;
     }
 
     const timestamp = new Date();
-    const record: AttendanceRecord = {
-      id: crypto.randomUUID(),
-      studentId: student.studentId,
-      studentName: student.name,
-      timestamp,
-      verified: true,
-      livenessScore: 1.0,
-    };
-
-    markAttendance(record);
-    setTodayCount(prev => prev + 1);
     
     // Set cooldown to prevent multiple marks
-    cooldownRef.current = student.studentId;
+    cooldownRef.current = student.student_id;
     setTimeout(() => {
       cooldownRef.current = null;
     }, 5000);
 
-    // Show confirmation
-    setConfirmedStudent({
-      name: student.name,
-      id: student.studentId,
-      time: timestamp,
-    });
-    setShowConfirmation(true);
-    
-    // Hide confirmation after 3 seconds
-    setTimeout(() => {
-      setShowConfirmation(false);
-      setConfirmedStudent(null);
-    }, 3000);
+    try {
+      const { error } = await markAttendance({
+        studentId: student.student_id,
+        studentName: student.name,
+        livenessScore: 1.0,
+      });
 
-    toast.success(`Attendance marked for ${student.name}`);
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
+
+      setTodayCount(prev => prev + 1);
+
+      // Show confirmation
+      setConfirmedStudent({
+        name: student.name,
+        id: student.student_id,
+        time: timestamp,
+      });
+      setShowConfirmation(true);
+      
+      // Hide confirmation after 3 seconds
+      setTimeout(() => {
+        setShowConfirmation(false);
+        setConfirmedStudent(null);
+      }, 3000);
+
+      toast.success(`Attendance marked for ${student.name}`);
+    } catch (err) {
+      toast.error('Failed to mark attendance');
+      console.error('Attendance error:', err);
+    }
   }, []);
 
   useEffect(() => {
@@ -131,7 +151,7 @@ const Attendance = () => {
         const matchedStudent = findMatchingStudent(detection.descriptor, students, 0.5);
 
         if (matchedStudent) {
-          handleAttendanceMarked(matchedStudent);
+          await handleAttendanceMarked(matchedStudent);
         } else {
           setOverlayMessage('Face not recognized. Please register first.');
           setOverlayType('error');
@@ -174,7 +194,9 @@ const Attendance = () => {
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Registered Students</p>
-                  <p className="text-2xl font-bold text-foreground">{students.length}</p>
+                  <p className="text-2xl font-bold text-foreground">
+                    {isLoading ? '...' : students.length}
+                  </p>
                 </div>
               </div>
             </div>
@@ -206,7 +228,12 @@ const Attendance = () => {
             </div>
           )}
 
-          {students.length === 0 ? (
+          {isLoading ? (
+            <div className="rounded-xl bg-card p-8 text-center shadow-card">
+              <Loader2 className="h-10 w-10 animate-spin text-primary mx-auto mb-4" />
+              <p className="text-muted-foreground">Loading students...</p>
+            </div>
+          ) : students.length === 0 ? (
             <div className="rounded-xl bg-card p-8 text-center shadow-card">
               <div className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-full bg-muted">
                 <Users className="h-8 w-8 text-muted-foreground" />

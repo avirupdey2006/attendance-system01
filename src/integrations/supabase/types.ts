@@ -14,7 +14,101 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      attendance_records: {
+        Row: {
+          id: string
+          liveness_score: number
+          marked_at: string
+          student_id: string
+          student_name: string
+          verified: boolean
+        }
+        Insert: {
+          id?: string
+          liveness_score?: number
+          marked_at?: string
+          student_id: string
+          student_name: string
+          verified?: boolean
+        }
+        Update: {
+          id?: string
+          liveness_score?: number
+          marked_at?: string
+          student_id?: string
+          student_name?: string
+          verified?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "attendance_records_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["student_id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          full_name: string | null
+          id: string
+          role: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          full_name?: string | null
+          id?: string
+          role?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          full_name?: string | null
+          id?: string
+          role?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      students: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          face_descriptor: Json
+          face_image: string
+          id: string
+          name: string
+          student_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          face_descriptor: Json
+          face_image: string
+          id?: string
+          name: string
+          student_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          face_descriptor?: Json
+          face_image?: string
+          id?: string
+          name?: string
+          student_id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

@@ -1,48 +1,64 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import Header from '@/components/Header';
 import AdminDashboard from '@/components/AdminDashboard';
+import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
-import { Lock, Shield, Eye, EyeOff } from 'lucide-react';
-
-// Simple admin credentials (in production, this would be handled by a proper auth system)
-const ADMIN_USERNAME = 'admin';
-const ADMIN_PASSWORD = 'admin123';
+import { Lock, Shield, Eye, EyeOff, Loader2, UserPlus } from 'lucide-react';
 
 const Admin = () => {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [username, setUsername] = useState('');
+  const { user, isLoading: authLoading, signIn, signUp, signOut } = useAuth();
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [fullName, setFullName] = useState('');
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
 
-    // Simulate network delay
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
-      setIsAuthenticated(true);
-      toast.success('Login successful');
-    } else {
-      toast.error('Invalid credentials');
+    try {
+      if (isSignUp) {
+        const { error } = await signUp(email, password, fullName);
+        if (error) {
+          toast.error(error.message);
+        } else {
+          toast.success('Account created successfully! You are now logged in.');
+        }
+      } else {
+        const { error } = await signIn(email, password);
+        if (error) {
+          toast.error(error.message);
+        } else {
+          toast.success('Login successful');
+        }
+      }
+    } catch (err) {
+      toast.error('An error occurred. Please try again.');
+    } finally {
+      setIsLoading(false);
     }
-
-    setIsLoading(false);
   };
 
-  const handleLogout = () => {
-    setIsAuthenticated(false);
-    setUsername('');
-    setPassword('');
+  const handleLogout = async () => {
+    await signOut();
     toast.info('Logged out successfully');
   };
 
-  if (isAuthenticated) {
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Loader2 className="h-10 w-10 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (user) {
     return <AdminDashboard onLogout={handleLogout} />;
   }
 
@@ -56,22 +72,40 @@ const Admin = () => {
             <div className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
               <Shield className="h-8 w-8 text-primary" />
             </div>
-            <h1 className="text-3xl font-bold text-foreground mb-2">Admin Login</h1>
+            <h1 className="text-3xl font-bold text-foreground mb-2">
+              {isSignUp ? 'Create Admin Account' : 'Admin Login'}
+            </h1>
             <p className="text-muted-foreground">
-              Sign in to access the attendance dashboard
+              {isSignUp 
+                ? 'Create an account to access the dashboard' 
+                : 'Sign in to access the attendance dashboard'}
             </p>
           </div>
 
           <div className="rounded-xl bg-card p-6 shadow-card">
-            <form onSubmit={handleLogin} className="space-y-6">
+            <form onSubmit={handleSubmit} className="space-y-6">
+              {isSignUp && (
+                <div className="space-y-2">
+                  <Label htmlFor="fullName">Full Name</Label>
+                  <Input
+                    id="fullName"
+                    type="text"
+                    placeholder="Enter your name"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    disabled={isLoading}
+                  />
+                </div>
+              )}
+
               <div className="space-y-2">
-                <Label htmlFor="username">Username</Label>
+                <Label htmlFor="email">Email</Label>
                 <Input
-                  id="username"
-                  type="text"
-                  placeholder="Enter username"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  id="email"
+                  type="email"
+                  placeholder="Enter email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   disabled={isLoading}
                 />
               </div>
@@ -102,19 +136,38 @@ const Admin = () => {
                 type="submit" 
                 size="lg" 
                 variant="hero"
-                disabled={isLoading || !username || !password}
+                disabled={isLoading || !email || !password || (isSignUp && !fullName)}
                 className="w-full"
               >
-                <Lock className="h-4 w-4" />
-                {isLoading ? 'Signing in...' : 'Sign In'}
+                {isLoading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    {isSignUp ? 'Creating account...' : 'Signing in...'}
+                  </>
+                ) : isSignUp ? (
+                  <>
+                    <UserPlus className="h-4 w-4" />
+                    Create Account
+                  </>
+                ) : (
+                  <>
+                    <Lock className="h-4 w-4" />
+                    Sign In
+                  </>
+                )}
               </Button>
             </form>
 
-            <div className="mt-6 rounded-lg bg-muted/50 p-4">
-              <p className="text-xs text-muted-foreground text-center">
-                <strong>Demo Credentials:</strong><br />
-                Username: admin | Password: admin123
-              </p>
+            <div className="mt-6 text-center">
+              <button
+                type="button"
+                onClick={() => setIsSignUp(!isSignUp)}
+                className="text-sm text-primary hover:underline"
+              >
+                {isSignUp 
+                  ? 'Already have an account? Sign in' 
+                  : "Don't have an account? Create one"}
+              </button>
             </div>
           </div>
         </div>
