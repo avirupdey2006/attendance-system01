@@ -7,8 +7,7 @@ import Header from '@/components/Header';
 import CameraView from '@/components/CameraView';
 import { useCamera } from '@/hooks/useCamera';
 import { useFaceRecognition } from '@/hooks/useFaceRecognition';
-import { saveStudent, getStudentById } from '@/lib/attendanceStorage';
-import { Student } from '@/types/attendance';
+import { saveStudent, getStudentById } from '@/lib/attendanceService';
 import { toast } from 'sonner';
 import { UserPlus, AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
 
@@ -20,6 +19,7 @@ const Register = () => {
   const [name, setName] = useState('');
   const [studentId, setStudentId] = useState('');
   const [isCapturing, setIsCapturing] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [capturedDescriptor, setCapturedDescriptor] = useState<Float32Array | null>(null);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [livenessStatus, setLivenessStatus] = useState<string>('');
@@ -100,37 +100,50 @@ const Register = () => {
       return;
     }
 
-    // Check if student ID already exists
-    const existing = getStudentById(studentId.trim());
-    if (existing) {
-      toast.error('A student with this ID is already registered');
-      return;
+    setIsSubmitting(true);
+
+    try {
+      // Check if student ID already exists
+      const existing = await getStudentById(studentId.trim());
+      if (existing) {
+        toast.error('A student with this ID is already registered');
+        setIsSubmitting(false);
+        return;
+      }
+
+      const { error } = await saveStudent({
+        studentId: studentId.trim(),
+        name: name.trim(),
+        faceDescriptor: capturedDescriptor,
+        faceImage: capturedImage,
+      });
+
+      if (error) {
+        toast.error(error.message);
+        setIsSubmitting(false);
+        return;
+      }
+
+      toast.success(`Student ${name} registered successfully!`);
+      
+      // Reset form
+      setName('');
+      setStudentId('');
+      setCapturedDescriptor(null);
+      setCapturedImage(null);
+      setIsLivenessVerified(false);
+      setLivenessStatus('');
+      setPreviousDescriptor(null);
+
+      setTimeout(() => {
+        navigate('/attendance');
+      }, 1500);
+    } catch (err) {
+      toast.error('Failed to register student. Please try again.');
+      console.error('Registration error:', err);
+    } finally {
+      setIsSubmitting(false);
     }
-
-    const student: Student = {
-      id: crypto.randomUUID(),
-      studentId: studentId.trim(),
-      name: name.trim(),
-      faceDescriptor: capturedDescriptor,
-      faceImage: capturedImage,
-      registeredAt: new Date(),
-    };
-
-    saveStudent(student);
-    toast.success(`Student ${name} registered successfully!`);
-    
-    // Reset form
-    setName('');
-    setStudentId('');
-    setCapturedDescriptor(null);
-    setCapturedImage(null);
-    setIsLivenessVerified(false);
-    setLivenessStatus('');
-    setPreviousDescriptor(null);
-
-    setTimeout(() => {
-      navigate('/attendance');
-    }, 1500);
   }, [name, studentId, capturedDescriptor, capturedImage, isLivenessVerified, navigate]);
 
   const handleRetake = useCallback(() => {
@@ -184,7 +197,7 @@ const Register = () => {
                     placeholder="Enter student name"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    disabled={isCapturing}
+                    disabled={isCapturing || isSubmitting}
                   />
                 </div>
                 <div className="space-y-2">
@@ -194,7 +207,7 @@ const Register = () => {
                     placeholder="Enter student ID"
                     value={studentId}
                     onChange={(e) => setStudentId(e.target.value)}
-                    disabled={isCapturing}
+                    disabled={isCapturing || isSubmitting}
                   />
                 </div>
               </div>
@@ -216,7 +229,7 @@ const Register = () => {
                         Face Captured
                       </div>
                     </div>
-                    <Button type="button" variant="outline" onClick={handleRetake} className="w-full">
+                    <Button type="button" variant="outline" onClick={handleRetake} className="w-full" disabled={isSubmitting}>
                       Retake Photo
                     </Button>
                   </div>
@@ -263,11 +276,20 @@ const Register = () => {
                 type="submit"
                 size="lg"
                 variant="hero"
-                disabled={!capturedDescriptor || !capturedImage || !name || !studentId}
+                disabled={!capturedDescriptor || !capturedImage || !name || !studentId || isSubmitting}
                 className="w-full"
               >
-                <UserPlus className="h-5 w-5" />
-                Complete Registration
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    Registering...
+                  </>
+                ) : (
+                  <>
+                    <UserPlus className="h-5 w-5" />
+                    Complete Registration
+                  </>
+                )}
               </Button>
             </form>
           </div>

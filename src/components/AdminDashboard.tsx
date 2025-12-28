@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import Header from '@/components/Header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,7 +10,7 @@ import {
   TableHeader, 
   TableRow 
 } from '@/components/ui/table';
-import { getAttendanceRecords, getStudents, getAttendanceByDate } from '@/lib/attendanceStorage';
+import { getAttendanceByDate, getStudents, Student, AttendanceRecord } from '@/lib/attendanceService';
 import { 
   LayoutDashboard, 
   Users, 
@@ -21,7 +21,8 @@ import {
   ChevronLeft,
   ChevronRight,
   CheckCircle,
-  XCircle
+  XCircle,
+  Loader2
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -32,44 +33,61 @@ const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'attendance' | 'students'>('attendance');
+  const [students, setStudents] = useState<Student[]>([]);
+  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const students = useMemo(() => getStudents(), []);
-  const allRecords = useMemo(() => getAttendanceRecords(), []);
-  
+  useEffect(() => {
+    const loadData = async () => {
+      setIsLoading(true);
+      try {
+        const [loadedStudents, loadedRecords] = await Promise.all([
+          getStudents(),
+          getAttendanceByDate(new Date(selectedDate))
+        ]);
+        setStudents(loadedStudents);
+        setAttendanceRecords(loadedRecords);
+      } catch (err) {
+        console.error('Error loading data:', err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadData();
+  }, [selectedDate]);
+
   const filteredRecords = useMemo(() => {
-    const dateRecords = getAttendanceByDate(new Date(selectedDate));
-    if (!searchQuery) return dateRecords;
+    if (!searchQuery) return attendanceRecords;
     
-    return dateRecords.filter(r => 
-      r.studentName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      r.studentId.toLowerCase().includes(searchQuery.toLowerCase())
+    return attendanceRecords.filter(r => 
+      r.student_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      r.student_id.toLowerCase().includes(searchQuery.toLowerCase())
     );
-  }, [selectedDate, searchQuery]);
+  }, [attendanceRecords, searchQuery]);
 
   const filteredStudents = useMemo(() => {
     if (!searchQuery) return students;
     
     return students.filter(s => 
       s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      s.studentId.toLowerCase().includes(searchQuery.toLowerCase())
+      s.student_id.toLowerCase().includes(searchQuery.toLowerCase())
     );
   }, [students, searchQuery]);
 
   const stats = useMemo(() => {
     const today = new Date().toISOString().split('T')[0];
-    const todayRecords = allRecords.filter(r => 
-      new Date(r.timestamp).toISOString().split('T')[0] === today
-    );
+    const isToday = selectedDate === today;
     
     return {
       totalStudents: students.length,
-      todayAttendance: todayRecords.length,
+      todayAttendance: attendanceRecords.length,
       attendanceRate: students.length > 0 
-        ? Math.round((todayRecords.length / students.length) * 100) 
+        ? Math.round((attendanceRecords.length / students.length) * 100) 
         : 0,
-      totalRecords: allRecords.length,
+      dateLabel: isToday ? "Today's" : 'Selected Date',
     };
-  }, [students, allRecords]);
+  }, [students, attendanceRecords, selectedDate]);
 
   const navigateDate = (direction: 'prev' | 'next') => {
     const date = new Date(selectedDate);
@@ -78,7 +96,7 @@ const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
   };
 
   const isStudentPresentOnDate = (studentId: string) => {
-    return filteredRecords.some(r => r.studentId === studentId);
+    return attendanceRecords.some(r => r.student_id === studentId);
   };
 
   return (
@@ -107,7 +125,9 @@ const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Total Students</p>
-                <p className="text-2xl font-bold text-foreground">{stats.totalStudents}</p>
+                <p className="text-2xl font-bold text-foreground">
+                  {isLoading ? '...' : stats.totalStudents}
+                </p>
               </div>
             </div>
           </div>
@@ -117,8 +137,10 @@ const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                 <CheckCircle className="h-6 w-6 text-success" />
               </div>
               <div>
-                <p className="text-sm text-muted-foreground">Today's Attendance</p>
-                <p className="text-2xl font-bold text-foreground">{stats.todayAttendance}</p>
+                <p className="text-sm text-muted-foreground">{stats.dateLabel} Attendance</p>
+                <p className="text-2xl font-bold text-foreground">
+                  {isLoading ? '...' : stats.todayAttendance}
+                </p>
               </div>
             </div>
           </div>
@@ -129,7 +151,9 @@ const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Attendance Rate</p>
-                <p className="text-2xl font-bold text-foreground">{stats.attendanceRate}%</p>
+                <p className="text-2xl font-bold text-foreground">
+                  {isLoading ? '...' : `${stats.attendanceRate}%`}
+                </p>
               </div>
             </div>
           </div>
@@ -139,8 +163,13 @@ const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                 <Calendar className="h-6 w-6 text-secondary-foreground" />
               </div>
               <div>
-                <p className="text-sm text-muted-foreground">Total Records</p>
-                <p className="text-2xl font-bold text-foreground">{stats.totalRecords}</p>
+                <p className="text-sm text-muted-foreground">Selected Date</p>
+                <p className="text-lg font-bold text-foreground">
+                  {new Date(selectedDate).toLocaleDateString('en-US', { 
+                    month: 'short', 
+                    day: 'numeric' 
+                  })}
+                </p>
               </div>
             </div>
           </div>
@@ -208,7 +237,11 @@ const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
 
           {/* Table Content */}
           <div className="overflow-x-auto">
-            {activeTab === 'attendance' ? (
+            {isLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            ) : activeTab === 'attendance' ? (
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -228,12 +261,12 @@ const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                   ) : (
                     filteredRecords.map((record) => (
                       <TableRow key={record.id}>
-                        <TableCell className="font-medium">{record.studentName}</TableCell>
-                        <TableCell>{record.studentId}</TableCell>
+                        <TableCell className="font-medium">{record.student_name}</TableCell>
+                        <TableCell>{record.student_id}</TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
                             <Clock className="h-4 w-4 text-muted-foreground" />
-                            {new Date(record.timestamp).toLocaleTimeString('en-US', {
+                            {new Date(record.marked_at).toLocaleTimeString('en-US', {
                               hour: '2-digit',
                               minute: '2-digit',
                               second: '2-digit',
@@ -270,22 +303,22 @@ const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                     </TableRow>
                   ) : (
                     filteredStudents.map((student) => {
-                      const isPresent = isStudentPresentOnDate(student.studentId);
+                      const isPresent = isStudentPresentOnDate(student.student_id);
                       return (
                         <TableRow key={student.id}>
                           <TableCell>
                             <div className="flex items-center gap-3">
                               <img
-                                src={student.faceImage}
+                                src={student.face_image}
                                 alt={student.name}
                                 className="h-10 w-10 rounded-full object-cover border-2 border-border"
                               />
                               <span className="font-medium">{student.name}</span>
                             </div>
                           </TableCell>
-                          <TableCell>{student.studentId}</TableCell>
+                          <TableCell>{student.student_id}</TableCell>
                           <TableCell>
-                            {new Date(student.registeredAt).toLocaleDateString('en-US', {
+                            {new Date(student.created_at).toLocaleDateString('en-US', {
                               year: 'numeric',
                               month: 'short',
                               day: 'numeric',
