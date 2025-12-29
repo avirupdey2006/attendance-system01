@@ -18,26 +18,71 @@ export const useCamera = (): UseCameraReturn => {
   const startCamera = useCallback(async () => {
     try {
       setError(null);
+
+      // Stop any existing stream first (prevents "camera light on" leaks)
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           width: { ideal: 640 },
           height: { ideal: 480 },
           facingMode: 'user',
         },
+        audio: false,
       });
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        streamRef.current = stream;
-        await videoRef.current.play();
-        setIsStreaming(true);
-      }
+      // Important: save the stream + flip UI state first.
+      // The <video> element is rendered only after isStreaming becomes true.
+      streamRef.current = stream;
+      setIsStreaming(true);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to access camera';
       setError(errorMessage);
       console.error('Camera error:', err);
     }
   }, []);
+
+  // Attach stream to the <video> element after React renders it.
+  useEffect(() => {
+    if (!isStreaming) return;
+
+    const video = videoRef.current;
+    const stream = streamRef.current;
+    if (!video || !stream) return;
+
+    if (video.srcObject !== stream) {
+      video.srcObject = stream;
+    }
+
+    let cancelled = false;
+
+    const play = async () => {
+      try {
+        // Ensure metadata is ready before playing (avoids blank preview on some browsers)
+        if (video.readyState < 1) {
+          await new Promise<void>((resolve) => {
+            const onLoaded = () => resolve();
+            video.addEventListener('loadedmetadata', onLoaded, { once: true });
+          });
+        }
+
+        if (cancelled) return;
+        await video.play();
+      } catch (e) {
+        // If autoplay is blocked, keep UI open and show a helpful error
+        console.warn('Video play() blocked or failed:', e);
+      }
+    };
+
+    play();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isStreaming]);
 
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
