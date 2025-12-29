@@ -12,14 +12,36 @@ interface UseCameraReturn {
 export const useCamera = (): UseCameraReturn => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const mountedRef = useRef(true);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Track mount state
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const stopCamera = useCallback(() => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    if (mountedRef.current) {
+      setIsStreaming(false);
+    }
+  }, []);
+
   const startCamera = useCallback(async () => {
     try {
-      setError(null);
+      if (mountedRef.current) setError(null);
 
-      // Stop any existing stream first (prevents "camera light on" leaks)
+      // Stop any existing stream first
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
@@ -34,18 +56,23 @@ export const useCamera = (): UseCameraReturn => {
         audio: false,
       });
 
-      // Important: save the stream + flip UI state first.
-      // The <video> element is rendered only after isStreaming becomes true.
+      // Only proceed if still mounted
+      if (!mountedRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+
       streamRef.current = stream;
       setIsStreaming(true);
     } catch (err) {
+      if (!mountedRef.current) return;
       const errorMessage = err instanceof Error ? err.message : 'Failed to access camera';
       setError(errorMessage);
       console.error('Camera error:', err);
     }
   }, []);
 
-  // Attach stream to the <video> element after React renders it.
+  // Attach stream to <video> element after React renders it
   useEffect(() => {
     if (!isStreaming) return;
 
@@ -59,40 +86,38 @@ export const useCamera = (): UseCameraReturn => {
 
     let cancelled = false;
 
-    const play = async () => {
+    const playVideo = async () => {
       try {
-        // Ensure metadata is ready before playing (avoids blank preview on some browsers)
         if (video.readyState < 1) {
-          await new Promise<void>((resolve) => {
+          await new Promise<void>((resolve, reject) => {
             const onLoaded = () => resolve();
+            const onError = () => reject(new Error('Video load failed'));
             video.addEventListener('loadedmetadata', onLoaded, { once: true });
+            video.addEventListener('error', onError, { once: true });
           });
         }
-
-        if (cancelled) return;
+        if (cancelled || !mountedRef.current) return;
         await video.play();
       } catch (e) {
-        // If autoplay is blocked, keep UI open and show a helpful error
         console.warn('Video play() blocked or failed:', e);
       }
     };
 
-    play();
+    playVideo();
 
     return () => {
       cancelled = true;
     };
   }, [isStreaming]);
 
-  const stopCamera = useCallback(() => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-    setIsStreaming(false);
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+      }
+    };
   }, []);
 
   const captureImage = useCallback((): string | null => {
@@ -101,19 +126,13 @@ export const useCamera = (): UseCameraReturn => {
     const canvas = document.createElement('canvas');
     canvas.width = videoRef.current.videoWidth;
     canvas.height = videoRef.current.videoHeight;
-    
+
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
 
     ctx.drawImage(videoRef.current, 0, 0);
     return canvas.toDataURL('image/jpeg', 0.8);
   }, [isStreaming]);
-
-  useEffect(() => {
-    return () => {
-      stopCamera();
-    };
-  }, [stopCamera]);
 
   return {
     videoRef,
