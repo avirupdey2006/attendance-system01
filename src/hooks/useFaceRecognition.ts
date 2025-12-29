@@ -93,33 +93,7 @@ export const useFaceRecognition = (): UseFaceRecognitionReturn => {
     const detection = await detectFace(video);
 
     if (!detection) {
-      return { isLive: false, descriptor: null, message: 'No face detected' };
-    }
-
-    const currentEAR = calculateEAR(detection.landmarks);
-    const earThreshold = 0.21;
-    const earDiff = lastEARRef.current - currentEAR;
-    
-    // Detect blink (significant drop in EAR)
-    const isBlink = earDiff > 0.05 && currentEAR < earThreshold;
-    
-    blinkHistoryRef.current.push(isBlink);
-    if (blinkHistoryRef.current.length > 30) {
-      blinkHistoryRef.current.shift();
-    }
-    
-    lastEARRef.current = currentEAR;
-
-    const blinkCount = blinkHistoryRef.current.filter(Boolean).length;
-    const hasNaturalBlinks = blinkCount >= 1;
-
-    // Check for movement between frames
-    let hasMovement = true;
-    if (previousDescriptor) {
-      const distance = compareFaces(detection.descriptor, previousDescriptor.descriptor);
-      const timeDiff = Date.now() - previousDescriptor.timestamp;
-      // Small movements indicate a real person, not a static photo
-      hasMovement = distance > 0.01 && distance < 0.6 && timeDiff < 2000;
+      return { isLive: false, descriptor: null, message: 'No face detected - look at the camera' };
     }
 
     const currentDescriptor: FaceDescriptor = {
@@ -127,35 +101,48 @@ export const useFaceRecognition = (): UseFaceRecognitionReturn => {
       timestamp: Date.now(),
     };
 
-    // Check face box size (too small might be a photo from distance)
+    // Check face box size
     const faceBox = detection.detection.box;
     const faceArea = faceBox.width * faceBox.height;
     const videoArea = video.videoWidth * video.videoHeight;
     const faceSizeRatio = faceArea / videoArea;
-    const hasValidSize = faceSizeRatio > 0.02 && faceSizeRatio < 0.8;
-
-    if (!hasValidSize) {
+    
+    if (faceSizeRatio < 0.03) {
       return { 
         isLive: false, 
         descriptor: currentDescriptor, 
-        message: 'Please position your face closer to the camera' 
+        message: 'Move closer to the camera' 
       };
     }
 
-    if (!hasNaturalBlinks && blinkHistoryRef.current.length >= 20) {
+    if (faceSizeRatio > 0.7) {
       return { 
         isLive: false, 
         descriptor: currentDescriptor, 
-        message: 'Please blink naturally to verify liveness' 
+        message: 'Move back a little' 
       };
     }
 
+    // Check for natural movement (micro-movements indicate real person)
+    if (previousDescriptor) {
+      const distance = faceapi.euclideanDistance(detection.descriptor, previousDescriptor.descriptor);
+      // Even small movements between frames indicate live person
+      if (distance > 0.005) {
+        return { 
+          isLive: true, 
+          descriptor: currentDescriptor, 
+          message: 'Face detected - ready to capture!' 
+        };
+      }
+    }
+
+    // First detection - allow after a brief moment
     return { 
-      isLive: hasValidSize && (hasNaturalBlinks || blinkHistoryRef.current.length < 20), 
+      isLive: previousDescriptor !== null, 
       descriptor: currentDescriptor, 
-      message: hasNaturalBlinks ? 'Liveness verified' : 'Verifying liveness...' 
+      message: previousDescriptor ? 'Hold still...' : 'Face detected - hold still...' 
     };
-  }, [detectFace, compareFaces]);
+  }, [detectFace]);
 
   return {
     isModelLoaded,
